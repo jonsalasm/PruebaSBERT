@@ -1,0 +1,5 @@
+
+John Doe is a software engineer with over 5 years of experience in backend development.
+He has worked extensively with Python and has deployed microservices using Docker and AWS.
+John has led engineering teams and is known for his strong communication skills and collaborative mindset.
+He holds a Bachelor's degree in Computer Science and has worked remotely with international teams.

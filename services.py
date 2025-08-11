@@ -8,6 +8,7 @@ nltk.download('punkt_tab')
 nltk.download('wordnet')
 nltk.download('omw-1.4')
 nltk.download('averaged_perceptron_tagger')
+nltk.download('averaged_perceptron_tagger_eng')
 nltk.download('stopwords')
 from typing import List, Dict, Optional, TypedDict, Tuple, Any
 import openai
@@ -186,7 +187,7 @@ def normalize_text(text: str) -> str:
     return ' '.join([w for w in lemmatized if w not in stop_words])
 
 
-def find_best_sentence_match(sentences, target, threshold=0.5):
+def find_best_sentence_match(sentences, target, threshold=0.6):
     from sklearn.metrics.pairwise import cosine_similarity
 
     target_norm = normalize_text(target)

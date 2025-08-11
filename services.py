@@ -1,26 +1,17 @@
 import re
-import nltk
-from nltk.stem import WordNetLemmatizer
-from nltk.corpus import stopwords, wordnet
-
-nltk.download('punkt')
-nltk.download('punkt_tab')
-nltk.download('wordnet')
-nltk.download('omw-1.4')
-nltk.download('averaged_perceptron_tagger')
-nltk.download('averaged_perceptron_tagger_eng')
-nltk.download('stopwords')
 from typing import List, Dict, Optional, TypedDict, Tuple, Any
-import openai
 import json
 import os
-from nltk.tokenize import sent_tokenize
+
+from nltk.stem import PorterStemmer
+import openai
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # Load local embedding model lazily
 _model = None
+
 
 def get_model():
     global _model
@@ -29,17 +20,25 @@ def get_model():
         _model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
     return _model
 
-lemmatizer = WordNetLemmatizer()
-stop_words = set(stopwords.words('english')) - {'using', 'with'}
 
-def _get_wordnet_pos(tag: str) -> str:
-    tag_dict = {
-        'J': wordnet.ADJ,
-        'N': wordnet.NOUN,
-        'V': wordnet.VERB,
-        'R': wordnet.ADV
-    }
-    return tag_dict.get(tag[0].upper(), wordnet.NOUN)
+# Fallback stop words list if NLTK data is unavailable
+DEFAULT_STOP_WORDS = {
+    "i", "me", "my", "myself", "we", "our", "ours", "ourselves", "you", "your", "yours",
+    "yourself", "yourselves", "he", "him", "his", "himself", "she", "her", "hers",
+    "herself", "it", "its", "itself", "they", "them", "their", "theirs", "themselves",
+    "what", "which", "who", "whom", "this", "that", "these", "those", "am", "is", "are",
+    "was", "were", "be", "been", "being", "have", "has", "had", "having", "do", "does",
+    "did", "doing", "a", "an", "the", "and", "but", "if", "or", "because", "as", "until",
+    "while", "of", "at", "by", "for", "about", "against", "between", "into", "through",
+    "during", "before", "after", "above", "below", "to", "from", "up", "down", "in", "out",
+    "on", "off", "over", "under", "again", "further", "then", "once", "here", "there",
+    "when", "where", "why", "how", "all", "any", "both", "each", "few", "more", "most",
+    "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than",
+    "too", "very", "can", "will", "just", "don", "should", "now"
+}
+
+stop_words = DEFAULT_STOP_WORDS - {"using", "with"}
+ps = PorterStemmer()
 
 # Keyword lists (could be externalized later)
 
@@ -61,9 +60,16 @@ class ExtraMatchInfo(TypedDict, total=False):
     years_experience_found: Dict[str, int]
     location_found: Optional[str]
     missing_soft_skills: List[str]
+    skill_report: Dict[str, List[str]]
 
 def extract_sentences(text: str) -> List[str]:
-    return sent_tokenize(text)
+    """Split text into sentences with a fallback if NLTK data is missing."""
+    try:
+        from nltk.tokenize import sent_tokenize
+        return sent_tokenize(text)
+    except LookupError:
+        # Fallback: simple split by punctuation
+        return [s for s in re.split(r'[.!?]\s*', text) if s]
 
 def extract_location(text: str) -> str:
     pattern = r"(remote|onsite|hybrid|[A-Z][a-z]+,? [A-Z][a-z]+)"
@@ -117,6 +123,29 @@ def extract_soft_skills(text: str, soft_skills: List[str]) -> List[str]:
     return [s for s in soft_skills if s.lower() in text]
 
 
+def compare_skills(
+    cv_skills: Tuple[List[str], List[str]],
+    job_skills: Tuple[List[str], List[str]],
+) -> Dict[str, List[str]]:
+    """Compare CV and job skills and return matched and missing skills."""
+
+    cv_hard, cv_soft = cv_skills
+    job_hard, job_soft = job_skills
+
+    matched_hard = sorted(set(cv_hard) & set(job_hard))
+    missing_hard = sorted(set(job_hard) - set(cv_hard))
+
+    matched_soft = sorted(set(cv_soft) & set(job_soft))
+    missing_soft = sorted(set(job_soft) - set(cv_soft))
+
+    return {
+        "matched_hard_skills": matched_hard,
+        "missing_hard_skills": missing_hard,
+        "matched_soft_skills": matched_soft,
+        "missing_soft_skills": missing_soft,
+    }
+
+
 def evaluate_resume_against_job(
     resume_text: str,
     job_title: str,
@@ -127,6 +156,10 @@ def evaluate_resume_against_job(
 
     job_blocks = responsibilities + qualifications_and_experience
     hard_skills, soft_skills = extract_skills_from_text(job_blocks)
+    cv_hard_skills, cv_soft_skills = extract_skills_from_text([resume_text])
+    skill_report = compare_skills(
+        (cv_hard_skills, cv_soft_skills), (hard_skills, soft_skills)
+    )
 
     resume_sentences = extract_sentences(resume_text)
     matches: List[SkillMatchDict] = []
@@ -140,7 +173,8 @@ def evaluate_resume_against_job(
     extra: ExtraMatchInfo = {
         "years_experience_found": {},
         "location_found": extract_location(resume_text),
-        "missing_soft_skills": []
+        "missing_soft_skills": [],
+        "skill_report": skill_report,
     }
 
     def score_section(category: str, items: List[str]) -> float:
@@ -167,6 +201,9 @@ def evaluate_resume_against_job(
     for skill in hard_skills:
         extra["years_experience_found"][skill] = extract_years_experience(resume_text, skill)
 
+    # Populate missing soft skills for backward compatibility
+    extra["missing_soft_skills"] = skill_report["missing_soft_skills"]
+
     scores["global_score"] = round(
         scores["hard_skills_score"] * 0.4 +
         scores["responsibilities_score"] * 0.25 +
@@ -181,9 +218,8 @@ def evaluate_resume_against_job(
 def normalize_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
-    words = nltk.word_tokenize(text)
-    pos_tags = nltk.pos_tag(words)
-    lemmatized = [lemmatizer.lemmatize(w, _get_wordnet_pos(pos)) for w, pos in pos_tags]
+    words = text.split()
+    lemmatized = [ps.stem(w) for w in words]
     return ' '.join([w for w in lemmatized if w not in stop_words])
 
 

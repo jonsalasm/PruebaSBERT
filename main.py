@@ -37,5 +37,8 @@ if __name__ == "__main__":
     print("\nSECTION SCORES:")
     print(json.dumps(scores, indent=2))
 
+    print("\nSKILL REPORT:")
+    print(json.dumps(extra.get("skill_report", {}), indent=2))
+
     print("\nEXTRA INFO:")
     print(json.dumps(extra, indent=2))

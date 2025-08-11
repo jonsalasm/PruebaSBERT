@@ -1,10 +1,14 @@
-from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
-import numpy as np
 import re
 import nltk
+from nltk.stem import WordNetLemmatizer
+from nltk.corpus import stopwords, wordnet
+
 nltk.download('punkt')
 nltk.download('punkt_tab')
+nltk.download('wordnet')
+nltk.download('omw-1.4')
+nltk.download('averaged_perceptron_tagger')
+nltk.download('stopwords')
 from typing import List, Dict, Optional, TypedDict, Tuple, Any
 import openai
 import json
@@ -14,8 +18,27 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Load local embedding model
-model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+# Load local embedding model lazily
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        from sentence_transformers import SentenceTransformer
+        _model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+    return _model
+
+lemmatizer = WordNetLemmatizer()
+stop_words = set(stopwords.words('english')) - {'using', 'with'}
+
+def _get_wordnet_pos(tag: str) -> str:
+    tag_dict = {
+        'J': wordnet.ADJ,
+        'N': wordnet.NOUN,
+        'V': wordnet.VERB,
+        'R': wordnet.ADV
+    }
+    return tag_dict.get(tag[0].upper(), wordnet.NOUN)
 
 # Keyword lists (could be externalized later)
 
@@ -156,21 +179,24 @@ def evaluate_resume_against_job(
 
 def normalize_text(text: str) -> str:
     text = text.lower()
-    text = re.sub(r'[^a-zA-Z0-9\s]', '', text)  # eliminar puntuación
-    stopwords = set(["the", "a", "an", "and", "with", "of", "in", "on", "for", "to", "from", "using"])
-    words = text.split()
-    return ' '.join([w for w in words if w not in stopwords])
+    text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
+    words = nltk.word_tokenize(text)
+    pos_tags = nltk.pos_tag(words)
+    lemmatized = [lemmatizer.lemmatize(w, _get_wordnet_pos(pos)) for w, pos in pos_tags]
+    return ' '.join([w for w in lemmatized if w not in stop_words])
 
 
 def find_best_sentence_match(sentences, target, threshold=0.5):
+    from sklearn.metrics.pairwise import cosine_similarity
+
     target_norm = normalize_text(target)
-    target_embedding = model.encode(target_norm)
+    target_embedding = get_model().encode(target_norm)
     best_score = 0.0
     best_sentence = None
 
     for sentence in sentences:
         sentence_norm = normalize_text(sentence)
-        sentence_embedding = model.encode(sentence_norm)
+        sentence_embedding = get_model().encode(sentence_norm)
         sim = cosine_similarity([target_embedding], [sentence_embedding])[0][0]
         if sim > best_score:
             best_score = sim

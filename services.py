@@ -1,6 +1,6 @@
 import re
 import nltk
-from nltk.stem import WordNetLemmatizer
+from nltk.stem import WordNetLemmatizer, PorterStemmer
 from nltk.corpus import stopwords, wordnet
 
 nltk.download('punkt')
@@ -30,7 +30,11 @@ def get_model():
     return _model
 
 lemmatizer = WordNetLemmatizer()
-stop_words = set(stopwords.words('english')) - {'using', 'with'}
+stemmer = PorterStemmer()
+try:
+    stop_words = set(stopwords.words('english')) - {'using', 'with'}
+except LookupError:
+    stop_words = {'i', 'am', 'the', 'and', 'a', 'an'}
 
 def _get_wordnet_pos(tag: str) -> str:
     tag_dict = {
@@ -71,11 +75,11 @@ def extract_location(text: str) -> str:
     return match.group(1) if match else ""
 
 
+def combine_job_description(responsibilities: List[str], qualifications: List[str]) -> str:
+    """Return a single text block combining job responsibilities and qualifications."""
+    return "\n".join(responsibilities + qualifications)
 
-def extract_skills_from_text(text_blocks: List[str]) -> Tuple[List[str], List[str]]:
-    
-
-    combined_text = ' '.join(text_blocks)
+def extract_skills_from_text(combined_text: str) -> Tuple[List[str], List[str]]:
 
     prompt = (
     "Extract all skills mentioned in the following job description. "
@@ -125,8 +129,8 @@ def evaluate_resume_against_job(
     required_location: Optional[str] = None
 ) -> Tuple[List[SkillMatchDict], SectionScores, ExtraMatchInfo]:
 
-    job_blocks = responsibilities + qualifications_and_experience
-    hard_skills, soft_skills = extract_skills_from_text(job_blocks)
+    job_description = combine_job_description(responsibilities, qualifications_and_experience)
+    hard_skills, soft_skills = extract_skills_from_text(job_description)
 
     resume_sentences = extract_sentences(resume_text)
     matches: List[SkillMatchDict] = []
@@ -181,9 +185,13 @@ def evaluate_resume_against_job(
 def normalize_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
-    words = nltk.word_tokenize(text)
-    pos_tags = nltk.pos_tag(words)
-    lemmatized = [lemmatizer.lemmatize(w, _get_wordnet_pos(pos)) for w, pos in pos_tags]
+    try:
+        words = nltk.word_tokenize(text)
+        pos_tags = nltk.pos_tag(words)
+        lemmatized = [lemmatizer.lemmatize(w, _get_wordnet_pos(pos)) for w, pos in pos_tags]
+    except LookupError:
+        words = text.split()
+        lemmatized = [stemmer.stem(w) for w in words]
     return ' '.join([w for w in lemmatized if w not in stop_words])
 
 

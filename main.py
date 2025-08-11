@@ -39,3 +39,6 @@ if __name__ == "__main__":
 
     print("\nEXTRA INFO:")
     print(json.dumps(extra, indent=2))
+
+    print("\nSKILL COMPARISON:")
+    print(json.dumps(extra.get("skill_report", {}), indent=2))

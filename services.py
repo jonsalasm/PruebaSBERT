@@ -61,10 +61,22 @@ class SectionScores(TypedDict):
     soft_skills_score: float
     global_score: float
 
+class SkillReport(TypedDict):
+    resume_hard_skills: List[str]
+    job_hard_skills: List[str]
+    matched_hard_skills: List[str]
+    missing_hard_skills: List[str]
+    resume_soft_skills: List[str]
+    job_soft_skills: List[str]
+    matched_soft_skills: List[str]
+    missing_soft_skills: List[str]
+
+
 class ExtraMatchInfo(TypedDict, total=False):
     years_experience_found: Dict[str, int]
     location_found: Optional[str]
     missing_soft_skills: List[str]
+    skill_report: SkillReport
 
 def extract_sentences(text: str) -> List[str]:
     return sent_tokenize(text)
@@ -116,6 +128,34 @@ def extract_skills_from_text(combined_text: str) -> Tuple[List[str], List[str]]:
             return [], []
 
 
+def extract_skills_from_resume(resume_text: str) -> Tuple[List[str], List[str]]:
+    """Extract hard and soft skills from a resume using the generic extractor."""
+    return extract_skills_from_text(resume_text)
+
+
+def compare_skills(cv_skills: Tuple[List[str], List[str]],
+                   job_skills: Tuple[List[str], List[str]]) -> Dict[str, List[str]]:
+    """Compare skill sets from resume and job description."""
+    cv_hard, cv_soft = cv_skills
+    job_hard, job_soft = job_skills
+
+    matched_hard = sorted(set(cv_hard) & set(job_hard))
+    missing_hard = sorted(set(job_hard) - set(cv_hard))
+    matched_soft = sorted(set(cv_soft) & set(job_soft))
+    missing_soft = sorted(set(job_soft) - set(cv_soft))
+
+    return {
+        "resume_hard_skills": cv_hard,
+        "job_hard_skills": job_hard,
+        "matched_hard_skills": matched_hard,
+        "missing_hard_skills": missing_hard,
+        "resume_soft_skills": cv_soft,
+        "job_soft_skills": job_soft,
+        "matched_soft_skills": matched_soft,
+        "missing_soft_skills": missing_soft,
+    }
+
+
 def extract_soft_skills(text: str, soft_skills: List[str]) -> List[str]:
     text = re.sub(r'\s+', ' ', text.lower())
     return [s for s in soft_skills if s.lower() in text]
@@ -130,7 +170,13 @@ def evaluate_resume_against_job(
 ) -> Tuple[List[SkillMatchDict], SectionScores, ExtraMatchInfo]:
 
     job_description = combine_job_description(responsibilities, qualifications_and_experience)
-    hard_skills, soft_skills = extract_skills_from_text(job_description)
+    job_hard_skills, job_soft_skills = extract_skills_from_text(job_description)
+    resume_hard_skills, resume_soft_skills = extract_skills_from_resume(resume_text)
+
+    skill_report = compare_skills(
+        (resume_hard_skills, resume_soft_skills),
+        (job_hard_skills, job_soft_skills)
+    )
 
     resume_sentences = extract_sentences(resume_text)
     matches: List[SkillMatchDict] = []
@@ -144,7 +190,8 @@ def evaluate_resume_against_job(
     extra: ExtraMatchInfo = {
         "years_experience_found": {},
         "location_found": extract_location(resume_text),
-        "missing_soft_skills": []
+        "missing_soft_skills": [],
+        "skill_report": skill_report,
     }
 
     def score_section(category: str, items: List[str]) -> float:
@@ -163,12 +210,14 @@ def evaluate_resume_against_job(
                 hits += 1
         return round(hits / len(items), 2) if items else 0.0
 
-    scores["hard_skills_score"] = score_section("hard_skill", hard_skills)
+    scores["hard_skills_score"] = score_section("hard_skill", job_hard_skills)
     scores["responsibilities_score"] = score_section("responsibility", responsibilities)
     scores["qualifications_score"] = score_section("qualification", qualifications_and_experience)
-    scores["soft_skills_score"] = score_section("soft_skill", soft_skills)
+    scores["soft_skills_score"] = score_section("soft_skill", job_soft_skills)
 
-    for skill in hard_skills:
+    extra["missing_soft_skills"] = skill_report["missing_soft_skills"]
+
+    for skill in job_hard_skills:
         extra["years_experience_found"][skill] = extract_years_experience(resume_text, skill)
 
     scores["global_score"] = round(

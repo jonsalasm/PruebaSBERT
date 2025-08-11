@@ -30,10 +30,14 @@ def test_evaluate_resume_passes_combined_description(monkeypatch):
         captured["text"] = text
         return [], []
 
+    def fake_extract_resume(text):
+        return [], []
+
     def fake_find_best_sentence_match(sentences, target, threshold=0.6):
         return None
 
     monkeypatch.setattr("services.extract_skills_from_text", fake_extract)
+    monkeypatch.setattr("services.extract_skills_from_resume", fake_extract_resume)
     monkeypatch.setattr("services.find_best_sentence_match", fake_find_best_sentence_match)
     monkeypatch.setattr("services.extract_sentences", lambda text: [])
 
